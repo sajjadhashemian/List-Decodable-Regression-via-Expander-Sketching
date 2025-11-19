@@ -1,5 +1,7 @@
 # expander_sketch_list.py
 import numpy as np
+# could use geometeric_median instead of MoM
+# from sklearn.covariance import geometric_median
 
 def _build_signed_buckets(X, y, B, dL, rng):
     """
@@ -7,13 +9,28 @@ def _build_signed_buckets(X, y, B, dL, rng):
 
     For each sample i in [n], choose dL distinct buckets in [B] and
     assign independent Rademacher signs in {+1, -1}. For each edge (i -> b)
-    with sign sigma, we append sigma * x_i as a row in bucket b, sigma * y_i,
-    and record the original index i.
+    with sign sigma, we append sigma * x_i as a row in bucket b and sigma * y_i
+    as the response, and we record the original index i.
 
-    Returns:
-        X_buckets: list of length B with (nb, d) arrays or None
-        y_buckets: list of length B with (nb,) arrays or None
-        idx_buckets: list of length B with (nb,) int arrays or None
+    Parameters
+    ----------
+    X : ndarray of shape (n, d)
+    y : ndarray of shape (n,)
+    B : int
+        Number of buckets.
+    dL : int
+        Left degree (number of buckets per sample).
+    rng : np.random.Generator
+
+    Returns
+    -------
+    X_buckets : list of length B
+        Each entry is either None or an array of shape (n_b, d).
+    y_buckets : list of length B
+        Each entry is either None or an array of shape (n_b,).
+    idx_buckets : list of length B
+        Each entry is either None or an int array of shape (n_b,) recording
+        the original sample indices.
     """
     n, d = X.shape
     X_lists = [[] for _ in range(B)]
@@ -28,7 +45,7 @@ def _build_signed_buckets(X, y, B, dL, rng):
         for b, sgn in zip(buckets_i, signs_i):
             X_lists[b].append(sgn * xi)
             y_lists[b].append(sgn * yi)
-            idx_lists[b].append(i)  # remember which original sample this row came from
+            idx_lists[b].append(i)
 
     X_buckets = []
     y_buckets = []
@@ -48,12 +65,19 @@ def _build_signed_buckets(X, y, B, dL, rng):
 def _robust_aggregate_Hg(H_list, g_list, M, rng):
     """
     Median-of-means aggregation over (H, g) pairs.
-    H_list: list of (d, d) arrays
-    g_list: list of (d,) arrays
-    M: number of blocks
-    Returns:
-        Sigma_hat: (d, d)
-        g_hat: (d,)
+
+    Parameters
+    ----------
+    H_list : list of np.ndarray, each (d, d)
+    g_list : list of np.ndarray, each (d,)
+    M : int
+        Number of MoM blocks.
+    rng : np.random.Generator
+
+    Returns
+    -------
+    Sigma_hat : (d, d)
+    g_hat : (d,)
     """
     K = len(H_list)
     if K == 0:
@@ -86,13 +110,19 @@ def _robust_aggregate_Hg(H_list, g_list, M, rng):
 
 def _robust_aggregate_matrices(M_list, M, rng):
     """
-    Median-of-means aggregation over a list of d x d matrices,
-    used for residual covariance Ĉ = RobustAggregation({Aᵀ diag(r²) A}).
+    Median-of-means aggregation over a list of d x d matrices.
 
-    M_list: list of (d, d) arrays
-    M: number of blocks
-    Returns:
-        M_hat: (d, d)
+    Used for the residual covariance C_hat = RobustAgg( Aᵀ diag(r²) A ).
+
+    Parameters
+    ----------
+    M_list : list of np.ndarray, each (d, d)
+    M : int
+        Number of MoM blocks.
+
+    Returns
+    -------
+    M_hat : (d, d)
     """
     K = len(M_list)
     if K == 0:
@@ -114,26 +144,51 @@ def _robust_aggregate_matrices(M_list, M, rng):
     M_hat = np.median(M_blocks, axis=0)
     return M_hat
 
-def _build_all_seeds_buckets(X, y, alpha, r, dL, R, rng_global, B=None):
+def _build_all_seeds_buckets(X, y, alpha, r, dL, R, rng_global, B=None, delta: float = 0.1, B_const: float = 1.0):
     """
-    For each seed s in [R], build:
-      - r repetitions
-      - B buckets per repetition
-    using signed expander-style sketches.
+    For each seed s in {1, ..., R}, build r signed expander sketches.
 
-    Returns:
-      seeds_info: list of dicts, one per seed, containing:
-          'X_buckets' : list of length r; each entry is list length B
-          'y_buckets' : same structure
-          'idx_buckets': same structure, with original indices per row
-          'B'         : number of buckets
+    Each seed s yields:
+      - r repetitions (t = 0..r-1)
+      - B buckets per repetition
+    using signed expander-style bucketings.
+
+    Parameters
+    ----------
+    X, y : data and responses.
+    alpha : float
+        Inlier fraction, used only to choose B if not given.
+    r : int
+        Number of repetitions.
+    dL : int
+        Left degree.
+    R : int
+        Number of independent seeds.
+    rng_global : np.random.Generator
+    B : int, optional
+        Number of buckets per repetition. If None, use B ≈ B_const * (d/alpha) * log(d/delta).
+
+    Returns
+    -------
+    seeds_info : list of dict
+        Each dict has keys:
+            "X_buckets": list length r, each an object of length B of bucket matrices
+            "y_buckets": same structure
+            "idx_buckets": same structure (original indices for each row)
+            "B": scalar, number of buckets
     """
     n, d = X.shape
     seeds_info = []
 
     if B is None:
-        log_term = np.log(max(d, 2))
-        B = max(10, int(np.ceil((d / max(alpha, 1e-3)) * log_term)))
+        alpha_eff = max(alpha, 1e-3)
+        d_eff = max(d, 2)
+        delta_eff = min(max(delta, 1e-6), 0.5)  # avoid weird values
+
+    # Theoretical scaling:  B ≍ B_const * (d/alpha) * log(d/delta)
+        log_term = np.log(d_eff / delta_eff)
+        B = max(10, int(np.ceil(B_const * (d_eff / alpha_eff) * log_term)))
+
 
     for _ in range(R):
         rng = np.random.default_rng(rng_global.integers(1, 10**9))
@@ -147,12 +202,14 @@ def _build_all_seeds_buckets(X, y, alpha, r, dL, R, rng_global, B=None):
             seed_y_buckets.append(y_buckets)
             seed_idx_buckets.append(idx_buckets)
 
-        seeds_info.append({
-            "X_buckets": seed_X_buckets,
-            "y_buckets": seed_y_buckets,
-            "idx_buckets": seed_idx_buckets,
-            "B": B,
-        })
+        seeds_info.append(
+            {
+                "X_buckets": seed_X_buckets,
+                "y_buckets": seed_y_buckets,
+                "idx_buckets": seed_idx_buckets,
+                "B": B,
+            }
+        )
 
     return seeds_info
 
@@ -167,57 +224,94 @@ def expander_sketch_list_regression(
     R: int = 10,
     M: int = None,
     lambda_reg: float = 1e-3,
-    eta: float = 0.5,
+    theta: float = 0.5,
     rho: float = 0.2,
-    cluster_radius: float = 5.0,
+    delta=0.1, 
+    B_const=1.0,
+    cluster_radius: float = 0.0, # not specified in the algorithm
     random_state: int = 0,
     prune_mode: str = "paper",
     verbose: bool = False,
 ):
     """
-    prune_mode:
-        - "paper": prune top-ρ highest scores (as in Algorithm 1 / Lemma 10)
-        - "flip":  prune bottom-ρ lowest scores (our experimental variant)
-    Multi-seed, list-producing expander-sketch regression implementing Algorithm 1
-    in a practical way:
+    Multi-seed, list-producing expander-sketch regression (Algorithm 1 style).
 
-    - For each seed s in [R]:
-        * Build r signed expander sketches (buckets) of [n].
-        * Run T rounds of:
-            - Bucket-wise normal equations on active buckets
-            - Robust aggregation (MoM) to get (Sigma_hat, g_hat)
-            - Solve (Sigma_hat + lambda I) beta = g_hat
-            - Residual-based spectral filtering with robust covariance aggregation
-        * Store final beta_s.
+    For each seed s in {1, ..., R}:
+      - Build r signed expander sketches (buckets) of [n].
+      - Run T rounds (τ = 0..T):
+          * Compute bucket-wise normal equations (H_{t,b}, g_{t,b}) on active buckets.
+          * Robustly aggregate these via MoM to get (Σ̂_τ, ĝ_τ).
+          * Solve (Σ̂_τ + λI) β_τ = ĝ_τ.
+          * If τ < T, perform residual-based spectral filtering:
+              - Robustly aggregate residual covariances.
+              - Take top eigenvector v of Ĉ.
+              - Score each bucket by vᵀ Aᵀ diag(r²) A v.
+              - Remove a ρ-fraction of buckets according to prune_mode.
 
-    - Cluster the list {beta_s} using a simple radius-based rule.
-      Return the cluster centers as the final candidate list.
+      - Store the final β_s from this seed.
 
-    Returns:
-        centers: list of np.ndarray, each shape (d,)
+    Finally, cluster the {β_s} using a simple radius-based heuristic
+    and return the cluster centers as the candidate list.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n, d)
+    y : ndarray of shape (n,)
+    alpha : float
+        Inlier fraction, used in the choice of B if not provided.
+    r : int, default=5
+        Number of repetitions per seed.
+    B : int, optional
+        Number of buckets per repetition.
+    dL : int, default=2
+        Left degree.
+    T : int, default=2
+        Number of filtering rounds.
+    R : int, default=10
+        Number of seeds.
+    M : int, optional
+        Number of MoM blocks for (H, g) aggregation.
+    lambda_reg : float, default=1e-3
+        Ridge parameter.
+    theta : float, default=0.5
+        Threshold for deciding whether there is a strong outlier direction:
+        require λ_max(Ĉ) > (1 + η) * mean_eig(Ĉ) to continue pruning.
+    rho : float, default=0.2
+        Fraction of buckets to prune each round.
+    cluster_radius : float, default=5.0
+        Radius used in simple clustering of β_s.
+    random_state : int, default=0
+        RNG seed.
+    prune_mode : {"paper", "flip"}, default="paper"
+        "paper": prune highest scores (as stated in Algorithm 1 / Lemma 10).
+        "flip" : experimental variant that prunes lowest scores.
+
+    Returns
+    -------
+    centers : list of ndarray, each shape (d,)
+        Candidate regression vectors.
     """
     rng_global = np.random.default_rng(random_state)
     n, d = X.shape
 
-    seeds_info = _build_all_seeds_buckets(X, y, alpha, r, dL, R, rng_global, B=B)
+    seeds_info = _build_all_seeds_buckets(X, y, alpha, r, dL, R, rng_global, B=B, delta=delta, B_const=B_const)
     candidates = []
 
     for seed in seeds_info:
-        idx_buckets_all = seed["idx_buckets"]
+        idx_buckets_all = seed["idx_buckets"]  # currently unused but useful for debugging
         B_val = seed["B"]
-        X_buckets_all = seed["X_buckets"]  # length r, each: list length B_val
+        X_buckets_all = seed["X_buckets"]  # length r
         y_buckets_all = seed["y_buckets"]
 
         # Active buckets: list of (t, b) pairs
         active_pairs = [(t, b) for t in range(r) for b in range(B_val)]
         beta_s = None
 
-        # initial number of active buckets
         if verbose:
             print(f"Seed: starting with {len(active_pairs)} active buckets")
 
         for tau in range(T + 1):
-            # 1) Build H_list, g_list from active buckets
+            # 1) Collect (H_{t,b}, g_{t,b}) from active buckets
             H_list = []
             g_list = []
             for (t, b) in active_pairs:
@@ -225,8 +319,8 @@ def expander_sketch_list_regression(
                 yb = y_buckets_all[t][b]
                 if Xb is None or yb is None or len(yb) == 0:
                     continue
-                H_tb = Xb.T @ Xb          # (d, d)
-                g_tb = Xb.T @ yb          # (d,)
+                H_tb = Xb.T @ Xb
+                g_tb = Xb.T @ yb
                 H_list.append(H_tb)
                 g_list.append(g_tb)
 
@@ -261,9 +355,9 @@ def expander_sketch_list_regression(
                 yb = y_buckets_all[t][b]
                 if Xb is None or yb is None or len(yb) == 0:
                     continue
-                r_tb = yb - Xb @ beta_s            # residuals
-                w = r_tb ** 2                      # weights
-                C_tb = Xb.T @ (w[:, None] * Xb)    # Aᵀ diag(r²) A
+                r_tb = yb - Xb @ beta_s
+                w = r_tb ** 2
+                C_tb = Xb.T @ (w[:, None] * Xb)
                 C_list.append(C_tb)
 
             if len(C_list) == 0:
@@ -280,14 +374,13 @@ def expander_sketch_list_regression(
             lambda_max = eigvals[idx_max]
             v = eigvecs[:, idx_max]
 
-            # Heuristic target variance: average eigenvalue
             target_var = np.mean(eigvals)
 
             # If no strong outlier direction, stop filtering
-            if lambda_max <= (1.0 + eta) * target_var:
+            if lambda_max <= (1.0 + theta) * target_var:
                 break
 
-            # Prune top rho fraction of buckets by Rayleigh score vᵀ Aᵀ diag(r²) A v
+            # Score buckets by vᵀ Aᵀ diag(r²) A v
             scored_pairs = []
             for (t, b) in active_pairs:
                 Xb = X_buckets_all[t][b]
@@ -297,16 +390,12 @@ def expander_sketch_list_regression(
                 r_tb = yb - Xb @ beta_s
                 w = r_tb ** 2
                 Xv = Xb @ v
-                score_tb = np.sum(w * (Xv ** 2))   # vᵀ C_tb v
+                score_tb = np.sum(w * (Xv ** 2))  # vᵀ C_tb v
                 scored_pairs.append(((t, b), score_tb))
 
             if len(scored_pairs) == 0:
                 break
 
-            # scored_pairs.sort(key=lambda x: x[1], reverse=True)
-            # k_prune = max(1, int(np.floor(rho * len(scored_pairs))))
-            # to_prune = set(pair for (pair, _) in scored_pairs[:k_prune])
-            
             # Decide pruning direction based on prune_mode
             if prune_mode == "paper":
                 # Algorithm 1 / Lemma 10: prune highest scores
@@ -321,8 +410,7 @@ def expander_sketch_list_regression(
             to_prune = set(pair for (pair, _) in scored_pairs[:k_prune])
 
             active_pairs = [pair for pair in active_pairs if pair not in to_prune]
-            # After pruning
-            if verbose: 
+            if verbose:
                 print(f"  After tau={tau} pruning, active buckets = {len(active_pairs)}")
 
             if len(active_pairs) == 0:
@@ -557,7 +645,7 @@ def debug_survivor_goodness(
     dL: int = 2,
     T: int = 7,
     lambda_reg: float = 1e-3,
-    eta: float = 0.1,
+    theta: float = 0.1,
     rho: float = 0.5,
     random_state: int = 123,
     prune_mode: str = "flip",
@@ -644,7 +732,7 @@ def debug_survivor_goodness(
         v = eigvecs[:, idx_max]
 
         target_var = np.mean(eigvals)
-        if lambda_max <= (1.0 + eta) * target_var:
+        if lambda_max <= (1.0 + theta) * target_var:
             print(f"[debug_survivor_goodness] tau={tau}: no strong outlier direction, stopping filtering.")
             break
 

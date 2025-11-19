@@ -1,129 +1,211 @@
 # expander_sketch_single.py
 import numpy as np
 
-def _build_random_bucketing(n, B, dL, rng):
-    """
-    Build r=1 random left-regular bucketing:
-    for each index i in [n], choose dL distinct buckets in [B].
-    Returns:
-        bucket_members: list of length B; bucket_members[b] = list of indices i.
-    """
-    bucket_members = [[] for _ in range(B)]
-    for i in range(n):
-        # choose dL distinct buckets for sample i
-        buckets_i = rng.choice(B, size=dL, replace=False)
-        for b in buckets_i:
-            bucket_members[b].append(i)
-    return bucket_members
+from expander_sketch_list import (
+    _build_signed_buckets,
+    _robust_aggregate_Hg,
+    _robust_aggregate_matrices,
+)
 
 
 def expander_sketch_regression_single_seed(
     X,
     y,
     alpha: float,
+    r: int = 5,
     B: int = None,
-    r: int = 3,
     dL: int = 2,
+    T: int = 2,
     M: int = None,
     lambda_reg: float = 1e-3,
+    theta: float = 0.5,
+    rho: float = 0.2,
+    delta: float = 0.1,
+    B_const: float = 1.0,
     random_state: int = 0,
+    prune_mode: str = "paper",
+    verbose: bool = False,
 ):
     """
-    Simplified single-seed version of Algorithm 1 (no spectral filtering, no list, just one estimator).
+    Single-seed version of the Expander-Sketch regression (Algorithm 1
+    with R = 1 and no clustering).
 
-    Steps:
-    1) For each repetition t = 1..r:
-         - Build random left-regular bucketing of [n] into B buckets, degree dL.
-         - For each bucket b, form local moments:
-               H_{t,b} = X_b^T X_b
-               g_{t,b} = X_b^T y_b
-    2) Collect all (H_{t,b}, g_{t,b}) pairs and partition into M blocks.
-    3) For each block, compute block means (H_m, g_m).
-    4) Aggregate across blocks using coordinate-wise median to get (Sigma_hat, g_hat).
-    5) Solve (Sigma_hat + lambda_reg I) * beta_hat = g_hat.
+    Parameters
+    ----------
+    X : ndarray, shape (n, d)
+    y : ndarray, shape (n,)
+    alpha : float
+        Inlier fraction.
+    r : int, default=5
+        Number of repetitions (hash functions).
+    B : int, optional
+        Number of buckets per repetition. If None, we use the theoretical
+        scaling B ≍ B_const * (d / alpha) * log(d / delta).
+    dL : int, default=2
+        Left degree (number of buckets per sample).
+    T : int, default=2
+        Number of filtering rounds.
+    M : int, optional
+        Number of MoM blocks for (H, g) aggregation. If None, we use
+        max(5, K // 10) where K is the number of active buckets.
+    lambda_reg : float, default=1e-3
+        Ridge regularization parameter.
+    theta : float, default=0.5
+        Eigenvalue threshold: continue filtering only if
+            lambda_max(C_hat) > (1 + theta) * mean_eig(C_hat).
+    rho : float, default=0.2
+        Fraction of buckets to prune on each filtering round.
+    delta : float, default=0.1
+        Failure probability used only in the choice of B when B is None.
+    B_const : float, default=1.0
+        Constant factor in the theoretical formula for B.
+    random_state : int, default=0
+        RNG seed.
+    prune_mode : {"paper", "flip"}, default="paper"
+        "paper": prune buckets with the *highest* Rayleigh scores
+                 (as in Algorithm 1 / Lemma 10).
+        "flip" : experimental variant that prunes the *lowest* scores.
+    verbose : bool, default=False
+        If True, print debug information about the number of active buckets.
 
-    Args:
-        X: (n, d) data matrix
-        y: (n,) response vector
-        alpha: inlier fraction (used only to choose B / M if not given)
-        B: number of buckets per repetition; if None, set ~ d/alpha
-        r: number of repetitions
-        dL: left degree (how many buckets each sample participates in)
-        M: number of MoM blocks; if None, pick ~ r*B/10
-        lambda_reg: ridge regularization
-        random_state: RNG seed
-
-    Returns:
-        beta_hat: (d,) estimated regression vector
+    Returns
+    -------
+    beta_hat : ndarray, shape (d,)
+        Final regression estimate for this single seed.
     """
     rng = np.random.default_rng(random_state)
     n, d = X.shape
 
-    # Choose B if not provided: paper suggests B ~ d/alpha (ignoring logs)
+    # --- Choose B if not provided (faithful to theory up to constants). ---
     if B is None:
-        B = max(10, int(np.ceil(d / max(alpha, 1e-3))))
+        alpha_eff = max(alpha, 1e-3)
+        d_eff = max(d, 2)
+        delta_eff = min(max(delta, 1e-6), 0.5)
+        log_term = np.log(d_eff / delta_eff)
+        B = max(10, int(np.ceil(B_const * (d_eff / alpha_eff) * log_term)))
 
-    # Gather all (H_{t,b}, g_{t,b}) pairs
-    H_list = []
-    g_list = []
+    # --- Build r signed expander bucketings for this *single* seed. ---
+    X_buckets_all = []
+    y_buckets_all = []
+    for _t in range(r):
+        X_buckets, y_buckets, _ = _build_signed_buckets(X, y, B, dL, rng)
+        X_buckets_all.append(X_buckets)
+        y_buckets_all.append(y_buckets)
 
-    for t in range(r):
-        bucket_members = _build_random_bucketing(n, B, dL, rng)
+    # Active buckets are all (t, b) pairs initially.
+    active_pairs = [(t, b) for t in range(r) for b in range(B)]
+    beta_hat = None
 
-        for b in range(B):
-            idx = bucket_members[b]
-            if len(idx) == 0:
+    if verbose:
+        print(f"[single-seed] starting with {len(active_pairs)} active buckets (B={B}, r={r})")
+
+    # ===================== Filtering rounds τ = 0..T =====================
+    for tau in range(T + 1):
+        # 1) Build the list of (H_{t,b}, g_{t,b}) over active buckets.
+        H_list = []
+        g_list = []
+        for (t, b) in active_pairs:
+            Xb = X_buckets_all[t][b]
+            yb = y_buckets_all[t][b]
+            if Xb is None or yb is None or len(yb) == 0:
                 continue
-
-            Xb = X[idx]
-            yb = y[idx]
-
-            H_tb = Xb.T @ Xb        # d x d
-            g_tb = Xb.T @ yb        # d
-
+            H_tb = Xb.T @ Xb
+            g_tb = Xb.T @ yb
             H_list.append(H_tb)
             g_list.append(g_tb)
 
-    if len(H_list) == 0:
-        # fallback: just ridge on all data
-        XtX = X.T @ X
-        Xty = X.T @ y
-        XtX_reg = XtX + lambda_reg * np.eye(d)
-        return np.linalg.solve(XtX_reg, Xty)
+        if len(H_list) == 0:
+            # Fallback: global ridge regression.
+            XtX = X.T @ X
+            Xty = X.T @ y
+            Sigma_reg = XtX + lambda_reg * np.eye(d)
+            beta_hat = np.linalg.solve(Sigma_reg, Xty)
+            if verbose:
+                print("[single-seed] no active buckets; fell back to global ridge.")
+            break
 
-    H_arr = np.stack(H_list, axis=0)   # (K, d, d)
-    g_arr = np.stack(g_list, axis=0)   # (K, d)
-    K = H_arr.shape[0]
+        K = len(H_list)
+        if M is None:
+            M_eff = max(5, K // 10)
+        else:
+            M_eff = min(M, K)
 
-    # Choose number of blocks M if not given
-    if M is None:
-        M = max(5, K // 10)
+        # 2) Robust aggregation of normal equations: (Sigma_hat, g_hat)
+        Sigma_hat, g_hat = _robust_aggregate_Hg(H_list, g_list, M_eff, rng)
 
-    # Partition indices into M blocks (near equal)
-    indices = np.arange(K)
-    rng.shuffle(indices)
-    blocks = np.array_split(indices, M)
+        # 3) Solve (Sigma_hat + lambda I) beta = g_hat
+        Sigma_reg = Sigma_hat + lambda_reg * np.eye(d)
+        beta_hat = np.linalg.solve(Sigma_reg, g_hat)
 
-    H_blocks = []
-    g_blocks = []
+        if tau == T:
+            # Final round: stop after solving.
+            break
 
-    for blk in blocks:
-        if len(blk) == 0:
-            continue
-        H_mean = np.mean(H_arr[blk], axis=0)
-        g_mean = np.mean(g_arr[blk], axis=0)
-        H_blocks.append(H_mean)
-        g_blocks.append(g_mean)
+        # 4) Residual covariance C_hat via robust aggregation.
+        C_list = []
+        for (t, b) in active_pairs:
+            Xb = X_buckets_all[t][b]
+            yb = y_buckets_all[t][b]
+            if Xb is None or yb is None or len(yb) == 0:
+                continue
+            r_tb = yb - Xb @ beta_hat
+            w = r_tb ** 2
+            C_tb = Xb.T @ (w[:, None] * Xb)   # Aᵀ diag(r²) A
+            C_list.append(C_tb)
 
-    H_blocks = np.stack(H_blocks, axis=0)  # (M', d, d)
-    g_blocks = np.stack(g_blocks, axis=0)  # (M', d)
+        if len(C_list) == 0:
+            break
 
-    # Robust aggregation: coordinate-wise median across blocks
-    Sigma_hat = np.median(H_blocks, axis=0)   # d x d
-    g_hat = np.median(g_blocks, axis=0)       # d
+        Kc = len(C_list)
+        Mc_eff = max(5, Kc // 10)
+        C_hat = _robust_aggregate_matrices(C_list, Mc_eff, rng)
 
-    # Solve (Sigma_hat + lambda I) beta = g_hat
-    Sigma_reg = Sigma_hat + lambda_reg * np.eye(d)
-    beta_hat = np.linalg.solve(Sigma_reg, g_hat)
+        # 5) Top eigenpair of C_hat and eigenvalue test.
+        eigvals, eigvecs = np.linalg.eigh(C_hat)
+        idx_max = np.argmax(eigvals)
+        lambda_max = eigvals[idx_max]
+        v = eigvecs[:, idx_max]
+
+        target_var = np.mean(eigvals)
+        if lambda_max <= (1.0 + theta) * target_var:
+            # No strong outlier direction ⇒ stop pruning.
+            if verbose:
+                print(f"[single-seed] τ={tau}: no strong direction, stopping filtering.")
+            break
+
+        # 6) Score and prune buckets.
+        scored_pairs = []
+        for (t, b) in active_pairs:
+            Xb = X_buckets_all[t][b]
+            yb = y_buckets_all[t][b]
+            if Xb is None or yb is None or len(yb) == 0:
+                continue
+            r_tb = yb - Xb @ beta_hat
+            w = r_tb ** 2
+            Xv = Xb @ v
+            score_tb = np.sum(w * (Xv ** 2))  # Rayleigh quotient vᵀ C_tb v
+            scored_pairs.append(((t, b), score_tb))
+
+        if len(scored_pairs) == 0:
+            break
+
+        if prune_mode == "paper":
+            # Algorithm 1 / Lemma 10: prune largest scores.
+            scored_pairs.sort(key=lambda x: x[1], reverse=True)
+        elif prune_mode == "flip":
+            # Experimental: prune smallest scores.
+            scored_pairs.sort(key=lambda x: x[1])
+        else:
+            raise ValueError(f"Unknown prune_mode: {prune_mode}")
+
+        k_prune = max(1, int(np.floor(rho * len(scored_pairs))))
+        to_prune = set(pair for (pair, _) in scored_pairs[:k_prune])
+
+        active_pairs = [pair for pair in active_pairs if pair not in to_prune]
+        if verbose:
+            print(f"[single-seed] τ={tau}: pruned {k_prune}, active={len(active_pairs)}")
+
+        if len(active_pairs) == 0:
+            break
 
     return beta_hat
