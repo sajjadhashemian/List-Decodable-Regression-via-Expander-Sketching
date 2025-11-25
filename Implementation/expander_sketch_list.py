@@ -49,7 +49,7 @@ def _apply_theory_defaults(alpha, d, r, T, R, dL, B, delta, B_const, use_theory_
 
     return r, T, R, dL, B, delta_eff, B_const
 
-# Build buckets for all seeds
+
 def build_all_seeds_buckets(
     X,
     y,
@@ -105,20 +105,22 @@ def build_all_seeds_buckets(
 
     return seeds_info
 
+
 # MAIN ALGORITHM 1
 def expander_sketch_list_regression(
     X,
     y,
     alpha: float,
 
-    # Theory
-    use_theory_defaults: bool = True,
+    # Theory mode flag
+    use_theory_defaults: bool = False,   # <- IMPORTANT: off by default for experiments
 
-    r: int = None,          # ≍ log(1/delta)
+    # Algorithmic parameters (can be tuned or swept)
+    r: int = None,          # ≍ log(1/delta) in theory
     B: int = None,          # ≍ (d/alpha) * log(d/delta)
-    dL: int = None,         # default replaced by theory if flag ON
-    T: int = None,          # ≍ log(1/alpha)
-    R: int = None,          # ≍ 1/alpha
+    dL: int = None,         # left degree of the expander
+    T: int = None,          # ≍ log(1/alpha) in theory
+    R: int = None,          # ≍ 1/alpha in theory
     M: int = None,          # MoM blocks -> default computed internally
 
     # Regularization / Filtering
@@ -131,11 +133,11 @@ def expander_sketch_list_regression(
     B_const: float = 5.0,
 
     # Clustering
-    cluster_radius: float = 0.0, # Do not delete any candidates
+    cluster_radius: float = 0.0,  # no merging of candidate vectors
 
     # Expander construction mode
     use_networkx: bool = False,
-    graph=None,                # NetworkX graph if use_networkx=True
+    graph=None,                  # NetworkX graph if use_networkx=True
 
     # Misc
     random_state: int = 123,
@@ -145,20 +147,32 @@ def expander_sketch_list_regression(
     Implementation of Algorithm 1 from:
         "List-Decodable Regression via Expander Sketching"
 
-    With toggles:
-        - use_theory_defaults=True  → theory-based parameter scaling
-        - use_theory_defaults=False → experimental / tuned parameters
-
-        - use_networkx=False → random hashing expander (default)
-        - use_networkx=True  → use provided NetworkX bipartite graph
+    Modes:
+      - use_theory_defaults=True:
+          parameters are set using theory-based scaling.
+      - use_theory_defaults=False:
+          user-specified (tuned / swept) parameters are used.
     """
     rng_global = np.random.default_rng(random_state)
     n, d = X.shape
 
-    # Apply theory-faithful defaults (if requested)
+    # Apply theory-faithful defaults (or leave as-is if flag is False)
     r, T, R, dL, B, delta, B_const = _apply_theory_defaults(
         alpha, d, r, T, R, dL, B, delta, B_const, use_theory_defaults
     )
+
+    # Safety: if user leaves some None with theory defaults off,
+    # we can plug in simple reasonable defaults.
+    if r is None:
+        r = 8
+    if T is None:
+        T = 7
+    if R is None:
+        R = 10
+    if dL is None:
+        dL = 2
+    if B is None:
+        B = choose_num_buckets(d, alpha, delta=delta, B_const=B_const)
 
     # Build expander sketches for all seeds
     seeds_info = build_all_seeds_buckets(
@@ -204,7 +218,7 @@ def expander_sketch_list_regression(
                 g_list.append(Xb.T @ yb)
 
             if len(H_list) == 0:
-                # fallback
+                # fallback: global ridge
                 XtX = X.T @ X
                 Xty = X.T @ y
                 beta_s = np.linalg.solve(XtX + lambda_reg * np.eye(d), Xty)

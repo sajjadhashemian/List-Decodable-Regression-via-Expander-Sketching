@@ -66,18 +66,18 @@ def generate_regression_with_outliers(
     inlier_mask = np.zeros(n, dtype=bool)
     inlier_mask[inlier_idx] = True
 
-    # --- Clean responses ---
+    # Clean responses
     y_clean = X @ w_star + rng.normal(scale=sigma_inlier, size=n)
     y = y_clean.copy()
 
-    # --- Leverage outliers: corrupt X with heavy-tailed rows ---
+    # Leverage outliers: corrupt X with heavy-tailed rows
     m = len(outlier_idx)
     if corrupt_X and m > 0:
         X[outlier_idx] = (
             rng.standard_t(df=leverage_df, size=(m, d)) * outlier_scale
         )
 
-    # --- Outlier responses ---
+    # Outlier responses
     if m > 0:
         if outlier_mode == "uniform":
             y_out = rng.uniform(-outlier_scale, outlier_scale, size=m)
@@ -121,7 +121,6 @@ def generate_regression_with_outliers(
 
         y[outlier_idx] = y_out
 
-    # --- Metadata ---
     info = RegressionDataInfo(
         n=n,
         d=d,

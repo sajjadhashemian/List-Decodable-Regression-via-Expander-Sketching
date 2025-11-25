@@ -10,8 +10,8 @@ def expander_sketch_regression_single_seed(
     y,
     alpha: float,
 
-    # Theory
-    use_theory_defaults: bool = True,
+    # Theory mode flag
+    use_theory_defaults: bool = False,   # <- off by default
 
     B: int = None,
     r: int = None,
@@ -31,14 +31,11 @@ def expander_sketch_regression_single_seed(
 
     If use_theory_defaults=True:
         r      = ceil(log(1/delta))
-        dL     = 2               (constant)
+        dL     = 2
         B      = choose_num_buckets(d, alpha, delta, B_const)
 
-    If use_networkx=False (default):
-        use random hashing (original implementation).
-
-    If use_networkx=True:
-        use the provided NetworkX bipartite graph 'graph'.
+    If use_theory_defaults=False:
+        use the user-specified (tuned / swept) parameters.
     """
     n, d = X.shape
     rng = np.random.default_rng(random_state)
@@ -49,6 +46,11 @@ def expander_sketch_regression_single_seed(
         if dL is None:
             dL = 2  # theory: O(1)
 
+    # Simple defaults if the user didn't specify and theory mode is off
+    if r is None:
+        r = 8
+    if dL is None:
+        dL = 2
     if B is None:
         B = choose_num_buckets(d, alpha, delta=delta, B_const=B_const)
 
