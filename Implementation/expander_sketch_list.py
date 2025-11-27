@@ -49,7 +49,6 @@ def _apply_theory_defaults(alpha, d, r, T, R, dL, B, delta, B_const, use_theory_
 
     return r, T, R, dL, B, delta_eff, B_const
 
-
 def build_all_seeds_buckets(
     X,
     y,
@@ -104,7 +103,6 @@ def build_all_seeds_buckets(
         })
 
     return seeds_info
-
 
 # MAIN ALGORITHM 1
 def expander_sketch_list_regression(
