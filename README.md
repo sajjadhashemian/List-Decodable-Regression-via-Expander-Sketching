@@ -1,3 +1,3 @@
 # List-Decodable Regression via Expander Sketching
-📄 **Preprint:** The arXiv link will be added here upon posting.  
+📄 **Preprint:** https://arxiv.org/abs/2511.22524
 
