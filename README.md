@@ -1,15 +1,14 @@
 # expander-ldr
 
-A research-oriented Python implementation of **list-decodable linear regression via expander sketching**, based on:
+A research-oriented Python implementation of:
 
 > H. Pourali, S. Hashemian, E. Ardeshir-Larijani,  
 > *List-Decodable Regression via Expander Sketching*, arXiv:2511.22524.
 
 The goal is to provide:
 
-- A **scikit-learn compatible** estimator,
-- A **modular implementation** of all algorithmic pieces (expander sketch, bucket-wise moments, robust aggregation, spectral filtering, and list generation),
-- A clean **experiment interface** for reproducing and extending empirical results.
+- A **scikit-learn compatible** estimator
+- A **modular implementation** of all algorithmic pieces (expander sketch, bucket-wise moments, robust aggregation, spectral filtering, and list generation)
 
 ---
 
@@ -131,9 +130,3 @@ python -m expander_ldr.experiments --config examples/run_synthetic_experiment.py
 or run the notebook in `examples/synthetic_demo.ipynb`.
 
 The experiment interface is deliberately simple: it exposes knobs for the contamination level, problem dimension, sample size, and algorithmic parameters, and standard metrics such as recovery error and prediction risk.
-
----
-
-## License
-
-MIT (or choose your preferred license).
