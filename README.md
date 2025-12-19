@@ -13,10 +13,10 @@ The goal is to provide:
 
 ---
 
-## Installation
+<!-- ## Installation
 
 ```bash
-git clone https://github.com/your-org/expander-ldr.git
+git clone https://github.com/sajjadhashemian/List-Decodable-Regression-via-Expander-Sketching.git
 cd expander-ldr
 pip install -e .
 ```
@@ -28,7 +28,7 @@ This will install the package `expander_ldr`.
 - numpy, scipy, scikit-learn
 - matplotlib (for plots in experiments)
 
----
+--- -->
 
 ## Quickstart
 

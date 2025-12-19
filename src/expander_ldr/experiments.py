@@ -1,4 +1,5 @@
 """Synthetic experiment interface and CLI helpers."""
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,9 @@ class SyntheticConfig:
 class ExperimentRunner:
     """Run synthetic experiments and report metrics."""
 
-    def __init__(self, cfg: SyntheticConfig):
+    def __init__(self, cfg: SyntheticConfig = None):
+        if cfg is None:
+            cfg = SyntheticConfig()
         self.cfg = cfg
 
     def generate_data(
@@ -105,7 +108,10 @@ class ExperimentRunner:
     def plot_results(self, results: Dict[str, Any]) -> None:
         """Plot recovery and prediction errors as a simple bar chart."""
 
-        metrics = {"recovery_error": results["recovery_error"], "test_mse": results["test_mse"]}
+        metrics = {
+            "recovery_error": results["recovery_error"],
+            "test_mse": results["test_mse"],
+        }
         fig, ax = plt.subplots()
         ax.bar(list(metrics.keys()), list(metrics.values()))
         ax.set_ylabel("Error")
@@ -115,15 +121,21 @@ class ExperimentRunner:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a synthetic expander LDR experiment")
+    parser = argparse.ArgumentParser(
+        description="Run a synthetic expander LDR experiment"
+    )
     parser.add_argument("--n-train", type=int, default=SyntheticConfig.n_train)
     parser.add_argument("--n-test", type=int, default=SyntheticConfig.n_test)
     parser.add_argument("--d", type=int, default=SyntheticConfig.d)
     parser.add_argument("--alpha", type=float, default=SyntheticConfig.alpha)
     parser.add_argument("--noise-std", type=float, default=SyntheticConfig.noise_std)
-    parser.add_argument("--outlier-scale", type=float, default=SyntheticConfig.outlier_scale)
+    parser.add_argument(
+        "--outlier-scale", type=float, default=SyntheticConfig.outlier_scale
+    )
     parser.add_argument("--seeds", type=int, default=SyntheticConfig.seeds)
-    parser.add_argument("--random-state", type=int, default=SyntheticConfig.random_state)
+    parser.add_argument(
+        "--random-state", type=int, default=SyntheticConfig.random_state
+    )
     return parser
 
 
