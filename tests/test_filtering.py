@@ -65,3 +65,32 @@ def test_filtering_output_shape():
     n_active = info["n_active"]
     assert all(x > 0 for x in n_active)
     assert all(n_active[i] >= n_active[i + 1] for i in range(len(n_active) - 1))
+
+
+def test_filtering_diagnostics_lengths():
+    rng = np.random.default_rng(1)
+    n, d = 120, 4
+    X = rng.normal(size=(n, d))
+    y = X @ rng.normal(size=d)
+
+    sketcher = ExpanderSketcher(n_buckets=10, repetitions=2, left_degree=2, random_state=2)
+    sketcher.fit(n_samples=n)
+    bucket_indices, bucket_signs = sketcher.get_bucket_assignment()
+
+    loop = FilteringLoop(
+        X,
+        y,
+        bucket_indices,
+        bucket_signs,
+        alpha=0.5,
+        repetitions=2,
+        n_buckets=10,
+        blocks=2,
+        ridge=0.0,
+        prune_eta=0.2,
+        prune_rho=0.5,
+        collect_diagnostics=True,
+    )
+    _, info = loop.run(max_rounds=3)
+    assert len(info["bucket_scores_by_round"]) == info["rounds_ran"]
+    assert len(info["pruned_buckets_by_round"]) == info["rounds_ran"]

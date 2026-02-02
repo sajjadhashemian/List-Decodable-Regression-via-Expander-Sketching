@@ -37,6 +37,28 @@ def test_estimator_fit_and_predict_roundtrip():
     assert preds.shape == (n,)
 
 
+def test_list_size_cap():
+    rng = np.random.default_rng(2)
+    n, d = 80, 5
+    X = rng.standard_normal((n, d))
+    coef = rng.standard_normal(d)
+    y = X @ coef + 0.1 * rng.standard_normal(n)
+
+    model = ExpanderLDRRegressor(
+        alpha=0.3,
+        seeds=5,
+        repetitions=2,
+        buckets=20,
+        left_degree=2,
+        filtering_rounds=1,
+        blocks=2,
+        list_size_cap=2,
+        random_state=0,
+    )
+    model.fit(X, y)
+    assert model.candidates_.shape[0] <= 2
+
+
 def test_sklearn_compatible():
     rng = np.random.default_rng(1)
     n, d = 40, 3

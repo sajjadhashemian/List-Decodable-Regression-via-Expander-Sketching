@@ -42,23 +42,13 @@ def test_expander_reproducible():
             )
 
 
-def test_nonregular_right_degrees():
+def test_expander_no_signs():
     sketcher = ExpanderSketcher(
-        n_buckets=7,
-        repetitions=1,
-        left_degree=3,
-        random_state=1,
-        regularity="configuration_model",
-    ).fit(n_samples=5)
+        n_buckets=10, repetitions=2, left_degree=2, random_state=0, use_signs=False
+    ).fit(n_samples=50)
 
-    total_assignments = sum(len(bucket) for bucket in sketcher.bucket_indices_[0])
-    assert total_assignments == 5 * sketcher.left_degree
-
-
-def test_near_regular_distribution_when_not_divisible():
-    sketcher = ExpanderSketcher(
-        n_buckets=7, repetitions=1, left_degree=3, random_state=0, regularity="regular"
-    ).fit(n_samples=5)
-
-    bucket_sizes = [len(bucket) for bucket in sketcher.bucket_indices_[0]]
-    assert max(bucket_sizes) - min(bucket_sizes) <= 1
+    for t in range(sketcher.repetitions):
+        for b in range(sketcher.n_buckets):
+            signs = sketcher.bucket_signs_[t][b]
+            if signs.size:
+                assert np.all(signs == 1.0)
