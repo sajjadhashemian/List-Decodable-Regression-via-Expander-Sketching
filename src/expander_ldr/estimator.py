@@ -58,6 +58,8 @@ class ExpanderLDRRegressor(BaseEstimator, RegressorMixin):
         If True, store per-seed diagnostics from filtering and sketching.
     timing : bool, default=True
         If True, store timing breakdowns in ``timings_``.
+    enable_filtering : bool, default=True
+        If False, disable residual-based filtering and solve once from aggregated moments.
     random_state : int or None, default=None
         Seed for reproducibility.
     n_jobs : int or None, default=None
@@ -84,6 +86,7 @@ class ExpanderLDRRegressor(BaseEstimator, RegressorMixin):
         list_size_cap: Optional[int] = None,
         return_diagnostics: bool = False,
         timing: bool = True,
+        enable_filtering: bool = True,
         fixed_bucket_indices: Optional[List[List[np.ndarray]]] = None,
         fixed_bucket_signs: Optional[List[List[np.ndarray]]] = None,
         random_state: Optional[int] = None,
@@ -107,6 +110,7 @@ class ExpanderLDRRegressor(BaseEstimator, RegressorMixin):
         self.list_size_cap = list_size_cap
         self.return_diagnostics = return_diagnostics
         self.timing = timing
+        self.enable_filtering = enable_filtering
         self.fixed_bucket_indices = fixed_bucket_indices
         self.fixed_bucket_signs = fixed_bucket_signs
         self.random_state = random_state
@@ -198,6 +202,7 @@ class ExpanderLDRRegressor(BaseEstimator, RegressorMixin):
                 prune_rho=self.prune_rho,
                 robust_method=self.robust_method,
                 collect_diagnostics=self.return_diagnostics,
+                enable_filtering=self.enable_filtering,
             )
 
             filtering_start = time.perf_counter()
@@ -250,10 +255,13 @@ class ExpanderLDRRegressor(BaseEstimator, RegressorMixin):
             keep = np.argsort(scores)[:cap]
             centers_capped = centers[keep]
         else:
+            keep = np.arange(centers.shape[0])
             centers_capped = centers
 
         self.candidates_raw_ = candidates
         self.candidates_uncapped_ = centers
+        self.candidate_labels_uncapped_ = labels
+        self.kept_center_indices_ = keep
         self.candidate_labels_ = labels
         self.candidates_ = centers_capped
         self.coef_ = centers_capped[0]
