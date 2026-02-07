@@ -248,18 +248,21 @@ def _generate_batched_data(cfg: SyntheticConfig, rng: np.random.Generator, batch
     return X_train, y_train, X_test, y_test, w_star, inlier_mask
 
 
-def _batched_bucket_assignment(n_samples: int, batch_size: int):
-    n_batches = n_samples // batch_size
+def _batched_bucket_assignment(n_samples: int, batch_size: int, repetitions: int):
+    n_batches = int(np.ceil(n_samples / batch_size))
     bucket_indices = []
     bucket_signs = []
-    buckets = []
-    signs = []
-    for b in range(n_batches):
-        idx = np.arange(b * batch_size, (b + 1) * batch_size)
-        buckets.append(idx)
-        signs.append(np.ones_like(idx, dtype=float))
-    bucket_indices.append(buckets)
-    bucket_signs.append(signs)
+    for _ in range(repetitions):
+        buckets = []
+        signs = []
+        for b in range(n_batches):
+            start = b * batch_size
+            end = min((b + 1) * batch_size, n_samples)
+            idx = np.arange(start, end)
+            buckets.append(idx)
+            signs.append(np.ones_like(idx, dtype=float))
+        bucket_indices.append(buckets)
+        bucket_signs.append(signs)
     return bucket_indices, bucket_signs
 
 
@@ -717,7 +720,9 @@ def _run_trial(exp_cfg: ExperimentConfig, trial_seed: int):
     sketch_override = None
     if exp_cfg.extras.get("fixed_batches"):
         batch_size = exp_cfg.extras.get("batch_size", 32)
-        bucket_indices, bucket_signs = _batched_bucket_assignment(X_train.shape[0], batch_size)
+        bucket_indices, bucket_signs = _batched_bucket_assignment(
+            X_train.shape[0], batch_size, cfg.repetitions
+        )
         sketch_override = {
             "sketch_type": "fixed",
             "fixed_bucket_indices": bucket_indices,
