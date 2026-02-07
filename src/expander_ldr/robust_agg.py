@@ -55,7 +55,7 @@ def geometric_median(X: np.ndarray, max_iter: int = 500, tol: float = 1e-6) -> n
 def aggregate_moments(
     H_list: Sequence[np.ndarray],
     g_list: Sequence[np.ndarray],
-    method: Literal["geom_median", "mom"] = "geom_median",
+    method: Literal["geom_median", "mom", "mean"] = "geom_median",
     n_blocks: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Aggregate local (H, g) pairs into global (Sigma_hat, g_hat).
@@ -84,7 +84,10 @@ def aggregate_moments(
         H_flat = H_arr.reshape(m, d * d)
         Sigma_hat = geometric_median(H_flat).reshape(d, d)
         g_hat = geometric_median(g_arr)
+    elif method == "mean":
+        Sigma_hat = H_arr.mean(axis=0)
+        g_hat = g_arr.mean(axis=0)
     else:
-        raise ValueError("method must be 'geom_median' or 'mom'")
+        raise ValueError("method must be 'geom_median', 'mom', or 'mean'")
 
     return Sigma_hat, g_hat

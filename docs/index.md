@@ -8,5 +8,6 @@ This package implements the **expander-sketched list-decodable regression** algo
 - [Theory](theory.md) – assumptions and guarantees, and how they map to code.
 - [API Reference](api.md) – public classes and functions.
 - [Experiments](experiments.md) – how to run and extend experiments.
+- [Code Reference](code_reference.md) – per-file walkthrough of the Python modules.
 
 The documentation assumes basic familiarity with linear regression, robust statistics, and Python/NumPy.

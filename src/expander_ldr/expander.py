@@ -1,8 +1,4 @@
-from __future__ import annotations
-
-"""Utilities for constructing expander sketches and bucket assignments."""
-
-"""Expander sketch construction
+"""Utilities for constructing expander sketches and bucket assignments.
 
 We implement the random left-regular bipartite construction used for expander sketching:
 for each repetition t and each sample i, choose d_L distinct neighbors (buckets) uniformly
@@ -14,6 +10,8 @@ The public API matches the estimator usage:
     expander.fit(n_samples)
     bucket_indices, bucket_signs = expander.get_bucket_assignment()
 """
+
+from __future__ import annotations
 
 from typing import List, Tuple, Union
 
@@ -125,6 +123,7 @@ class ExpanderSketcher:
         left_degree: int,
         random_state: Union[int, np.random.Generator, None] = None,
         allow_replacement: bool = False,
+        use_signs: bool = True,
     ) -> None:
         if n_buckets <= 0:
             raise ValueError("n_buckets must be positive.")
@@ -137,6 +136,7 @@ class ExpanderSketcher:
         self.repetitions = int(repetitions)
         self.left_degree = int(left_degree)
         self.allow_replacement = bool(allow_replacement)
+        self.use_signs = bool(use_signs)
         self.rng_ = _as_rng(random_state)
 
     def fit(self, n_samples: int) -> "ExpanderSketcher":
@@ -170,12 +170,15 @@ class ExpanderSketcher:
                     degree=self.left_degree,
                 )
 
-            # Independent Rademacher signs per edge.
-            signs = self.rng_.choice(
-                np.array([-1.0, 1.0], dtype=np.float64),
-                size=(self.n_samples_, self.left_degree),
-                replace=True,
-            )
+            if self.use_signs:
+                # Independent Rademacher signs per edge.
+                signs = self.rng_.choice(
+                    np.array([-1.0, 1.0], dtype=np.float64),
+                    size=(self.n_samples_, self.left_degree),
+                    replace=True,
+                )
+            else:
+                signs = np.ones((self.n_samples_, self.left_degree), dtype=np.float64)
 
             bucket_idx, bucket_sgn = _invert_to_buckets(
                 n_samples=self.n_samples_,

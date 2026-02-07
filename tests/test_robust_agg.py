@@ -34,10 +34,19 @@ def test_aggregate_moments_shapes():
         H_list.append(H)
         g_list.append(g)
 
-    Sigma_hat_geom, g_hat_geom = aggregate_moments(H_list, g_list, method="geom_median")
-    Sigma_hat_mom, g_hat_mom = aggregate_moments(H_list, g_list, method="mom", n_blocks=2)
+    Sigma_hat_geom, g_hat_geom = aggregate_moments(
+        H_list, g_list, method="geom_median"
+    )
+    Sigma_hat_mom, g_hat_mom = aggregate_moments(
+        H_list, g_list, method="mom", n_blocks=2
+    )
+    Sigma_hat_mean, g_hat_mean = aggregate_moments(H_list, g_list, method="mean")
 
-    for Sigma_hat, g_hat in [(Sigma_hat_geom, g_hat_geom), (Sigma_hat_mom, g_hat_mom)]:
+    for Sigma_hat, g_hat in [
+        (Sigma_hat_geom, g_hat_geom),
+        (Sigma_hat_mom, g_hat_mom),
+        (Sigma_hat_mean, g_hat_mean),
+    ]:
         assert Sigma_hat.shape == (3, 3)
         assert g_hat.shape == (3,)
         assert np.isfinite(Sigma_hat).all()
